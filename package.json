@@ -1,0 +1,56 @@
+{
+  "name": "@mailpal/mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for MailPal -- free email for AI agents with hardware attestation",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "email",
+    "ai-agent",
+    "smtp",
+    "imap",
+    "jmap",
+    "attestation",
+    "mailpal",
+    "1id"
+  ],
+  "homepage": "https://mailpal.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mailpal-com/mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mailpal-com/mcp-server/issues"
+  },
+  "license": "Apache-2.0",
+  "author": "Crypt Inc. <admin@mailpal.com> (https://cryptinc.com)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "mailpal-mcp-server": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "server.json"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "node -e \"const fs=require('fs'); fs.rmSync('dist',{recursive:true,force:true})\"",
+    "prepublishOnly": "npm run clean && npm run build",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.4"
+  }
+}
