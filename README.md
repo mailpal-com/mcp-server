@@ -1,12 +1,12 @@
-# @mailpal/mcp-server
+# mailpal-mcp-server
 
 **Free email for AI agents** -- MCP server for [mailpal.com](https://mailpal.com)
 
 ```bash
-npx @mailpal/mcp-server
+npx mailpal-mcp-server
 ```
 
-[![npm](https://img.shields.io/npm/v/@mailpal/mcp-server)](https://www.npmjs.com/package/@mailpal/mcp-server)
+[![npm](https://img.shields.io/npm/v/mailpal-mcp-server)](https://www.npmjs.com/package/mailpal-mcp-server)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 ---
@@ -26,7 +26,16 @@ npx @mailpal/mcp-server
 | `mailpal_check_inbox` | Check inbox for messages -- returns summaries with sender, subject, date, preview |
 | `mailpal_read_message` | Read full message content including text body, HTML body, and all metadata |
 | `mailpal_subscribe_to_inbox` | Subscribe to real-time "You've Got Mail!" notifications when new email arrives |
+| `mailpal_wait_for_email` | Block until new email arrives or timeout (requires subscribe first) |
+| `mailpal_register_email_callback` | Register a webhook URL to POST when new email arrives |
+| `mailpal_unregister_email_callback` | Remove a previously registered webhook callback |
 | `mailpal_jmap` | Raw JMAP passthrough -- delete, move, flag, search, folders, contacts, calendars, sieve filters, blob upload, anything JMAP supports |
+| `oneid_get_or_create_identity` | Get or create a hardware-anchored 1id identity for this agent |
+| `oneid_status` | Full picture of identity, devices, connected services |
+| `oneid_get_bearer_token` | Get an OAuth2 Bearer token for the current identity |
+| `oneid_sign_challenge` | Sign a verifier-provided nonce to prove hardware identity |
+| `oneid_verify_peer_identity` | Verify another agent's identity proof bundle |
+| `oneid_list_credential_pointers` | List credential pointers for an identity |
 
 The `mailpal_jmap` tool gives your agent access to the full JMAP specification (RFC 8620/8621)
 and all Stalwart extensions. If a convenience tool doesn't exist for what you need, use this.
@@ -50,7 +59,7 @@ This creates a hardware-anchored identity and gives you a JWT token.
   "mcpServers": {
     "mailpal": {
       "command": "npx",
-      "args": ["-y", "@mailpal/mcp-server"],
+      "args": ["-y", "mailpal-mcp-server"],
       "env": {
         "MAILPAL_TOKEN": "<your-1id-jwt>"
       }
@@ -66,7 +75,7 @@ This creates a hardware-anchored identity and gives you a JWT token.
   "mcpServers": {
     "mailpal": {
       "command": "npx",
-      "args": ["-y", "@mailpal/mcp-server"],
+      "args": ["-y", "mailpal-mcp-server"],
       "env": {
         "MAILPAL_TOKEN": "<your-1id-jwt>"
       }
@@ -82,7 +91,7 @@ This creates a hardware-anchored identity and gives you a JWT token.
   "mcpServers": {
     "mailpal": {
       "command": "npx",
-      "args": ["-y", "@mailpal/mcp-server"],
+      "args": ["-y", "mailpal-mcp-server"],
       "env": {
         "MAILPAL_TOKEN": "<your-1id-jwt>"
       }
@@ -119,7 +128,7 @@ via MCP resource subscriptions and SSE.
 
 ## Also Available As
 
-- **Python**: [`mailpal-mcp`](https://pypi.org/project/mailpal-mcp/) on PyPI -- `uvx mailpal-mcp` or `pip install mailpal-mcp`
+- **Python**: [`mailpal-mcp`](https://pypi.org/project/mailpal-mcp/) on PyPI -- `pip install mailpal-mcp`
 - **Hosted endpoint**: `https://mailpal.com/mcp` (Streamable HTTP, supports real-time notifications)
 - **REST API**: `https://mailpal.com/api/v1/` ([docs](https://mailpal.com/api/docs))
 - **Direct IMAP/SMTP**: `imap.mailpal.com:993` / `smtp.mailpal.com:587` (standard email clients)
