@@ -1171,29 +1171,56 @@ async function _handle_mailpal_delete_emails_operation(params: Record<string, un
   const sdk_token = await oneid.get_token();
   const _jmap_account_id = "default";
 
-  let method_calls: unknown[];
   if (is_permanent_deletion) {
-    method_calls = [
-      ["Email/set", { accountId: _jmap_account_id, destroy: message_ids_to_process }, "delete"],
-    ];
-  } else {
-    method_calls = [
-      ["Mailbox/query", { accountId: _jmap_account_id, filter: { role: "trash" } }, "find_trash"],
-    ];
-    for (let idx = 0; idx < message_ids_to_process.length; idx++) {
-      method_calls.push(
-        ["Email/set", {
+    const api_response = await send_authenticated_request_to_mailpal_rest_api(
+      "/jmap", "POST", {
+        using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+        methodCalls: [
+          ["Email/set", { accountId: _jmap_account_id, destroy: message_ids_to_process }, "delete"],
+        ],
+      }, undefined, sdk_token.access_token,
+    );
+    return JSON.stringify(api_response, null, 2);
+  }
+
+  const trash_lookup_response = await send_authenticated_request_to_mailpal_rest_api(
+    "/jmap", "POST", {
+      using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+      methodCalls: [
+        ["Mailbox/query", { accountId: _jmap_account_id, filter: { role: "trash" } }, "find_trash"],
+        ["Mailbox/get", {
           accountId: _jmap_account_id,
-          update: { [message_ids_to_process[idx]]: { mailboxIds: { "#": true } } },
-        }, `move_${idx}`],
-      );
+          "#ids": { resultOf: "find_trash", name: "Mailbox/query", path: "/ids" },
+          properties: ["id"],
+        }, "get_trash"],
+      ],
+    }, undefined, sdk_token.access_token,
+  );
+
+  const trash_responses = (trash_lookup_response["methodResponses"] as unknown[][]) ?? [];
+  let trash_mailbox_id: string | null = null;
+  for (const entry of trash_responses) {
+    if (entry[0] === "Mailbox/get") {
+      const list = ((entry[1] as Record<string, unknown>)["list"] as Record<string, unknown>[]) ?? [];
+      if (list.length > 0) { trash_mailbox_id = list[0]["id"] as string; }
     }
+  }
+
+  if (!trash_mailbox_id) {
+    return JSON.stringify({ error: "Could not find Trash folder on this JMAP server." });
+  }
+
+  const email_updates: Record<string, unknown> = {};
+  for (const msg_id of message_ids_to_process) {
+    email_updates[msg_id] = { mailboxIds: { [trash_mailbox_id]: true } };
   }
 
   const api_response = await send_authenticated_request_to_mailpal_rest_api(
     "/jmap", "POST", {
       using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
-      methodCalls: method_calls,
+      methodCalls: [
+        ["Email/set", { accountId: _jmap_account_id, update: email_updates }, "trash_emails"],
+      ],
     }, undefined, sdk_token.access_token,
   );
   return JSON.stringify(api_response, null, 2);
@@ -1217,36 +1244,47 @@ async function _handle_mailpal_move_emails_operation(
   const sdk_token = await oneid.get_token();
   const _jmap_account_id = "default";
 
-  const mailbox_query_response = await send_authenticated_request_to_mailpal_rest_api(
+  const friendly_name_to_jmap_role: Record<string, string> = {
+    "trash": "trash", "deleted": "trash", "deleted items": "trash",
+    "inbox": "inbox",
+    "sent": "sent", "sent items": "sent", "sent mail": "sent",
+    "drafts": "drafts", "draft": "drafts",
+    "junk": "junk", "spam": "junk", "junk mail": "junk",
+    "archive": "archive",
+  };
+
+  const all_mailboxes_response = await send_authenticated_request_to_mailpal_rest_api(
     "/jmap", "POST", {
       using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
       methodCalls: [
-        ["Mailbox/query", { accountId: _jmap_account_id, filter: { name: target_folder_name } }, "find_mailbox"],
-        ["Mailbox/get", {
-          accountId: _jmap_account_id,
-          "#ids": { resultOf: "find_mailbox", name: "Mailbox/query", path: "/ids" },
-          properties: ["id", "name"],
-        }, "get_mailbox"],
+        ["Mailbox/get", { accountId: _jmap_account_id, properties: ["id", "name", "role"] }, "all_mailboxes"],
       ],
     }, undefined, sdk_token.access_token,
   );
 
-  const mailbox_results = (mailbox_query_response["methodResponses"] as unknown[][]) ?? [];
+  const mailbox_results = (all_mailboxes_response["methodResponses"] as unknown[][]) ?? [];
   let target_mailbox_id: string | null = null;
-  for (const response_entry of mailbox_results) {
-    if (response_entry[0] === "Mailbox/get") {
-      const mailbox_list = ((response_entry[1] as Record<string, unknown>)["list"] as Record<string, unknown>[]) ?? [];
-      if (mailbox_list.length > 0) {
-        target_mailbox_id = mailbox_list[0]["id"] as string;
-      }
+  const all_mailboxes = ((mailbox_results[0]?.[1] as Record<string, unknown>)?.["list"] as Record<string, unknown>[]) ?? [];
+
+  const mapped_role = friendly_name_to_jmap_role[target_folder_name.toLowerCase()];
+  if (mapped_role) {
+    for (const mb of all_mailboxes) {
+      if (mb["role"] === mapped_role) { target_mailbox_id = mb["id"] as string; break; }
+    }
+  }
+  if (!target_mailbox_id) {
+    const lower_target = target_folder_name.toLowerCase();
+    for (const mb of all_mailboxes) {
+      if ((mb["name"] as string).toLowerCase() === lower_target) { target_mailbox_id = mb["id"] as string; break; }
     }
   }
 
   if (!target_mailbox_id) {
+    const available_names = all_mailboxes.map((mb) => mb["name"] as string).join(", ");
     return _format_gateway_error_response_as_json(
       "folder_not_found",
       `Folder '${target_folder_name}' not found.`,
-      "Use a valid folder name like 'Archive', 'Trash', 'Sent', 'Drafts', 'INBOX'.",
+      `Available folders: ${available_names}. You can also use common names like Trash, Inbox, Sent, Drafts, Junk, Archive.`,
       readme_text,
     );
   }
@@ -1619,7 +1657,7 @@ mailpal_mcp_server_instance.tool(
       if (operation === "detect_hardware") {
         let hardware_security_modules: unknown[] = [];
         try {
-          const { detect_available_hsms } = await import("1id/dist/helper.js" as string);
+          const { detect_available_hsms } = await import("1id/helper");
           hardware_security_modules = await detect_available_hsms();
         } catch {
           hardware_security_modules = [];
