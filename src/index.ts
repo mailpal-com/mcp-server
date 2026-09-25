@@ -18,17 +18,23 @@ import { z } from "zod";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import oneid, {
+  fetch_with_airs_proof_of_possession,
+  type Token,
   type MailpalSendOptions,
   type MailpalActivateOptions,
   type IdentityProofBundle,
 } from "1id";
 
 const MAILPAL_REST_API_BASE_URL = process.env.MAILPAL_API_URL ?? "https://mailpal.com/api/v1";
-const MAILPAL_BEARER_AUTH_TOKEN = process.env.MAILPAL_TOKEN ?? "";
+// No static bearer token: 1ID tokens are sender-constrained (cnf.jwk), so every
+// MailPal call is signed with the enrolled key through the 1id SDK (OWN-038).
+if (process.env.MAILPAL_TOKEN) {
+  console.error("mailpal-mcp-server: MAILPAL_TOKEN is ignored -- MailPal accepts only sender-constrained " +
+    "1ID tokens; this server uses your 1id enrollment to sign each request.");
+}
 
 let inbox_sse_abort_controller: AbortController | null = null;
 let subscribed_inbox_resource_uri: string | null = null;
-let bearer_token_for_active_sse_inbox_connection: string = "";
 let registered_email_arrival_callbacks: Array<Record<string, unknown>> = [];
 
 const _ATTESTATION_MODE_MCP_INTEGER_TO_SDK_STRING: Record<number, MailpalSendOptions["attestation_mode"]> = {
@@ -158,7 +164,7 @@ async function send_authenticated_request_to_mailpal_rest_api(
   http_method: "GET" | "POST" = "GET",
   json_request_body?: Record<string, unknown>,
   url_query_parameters?: Record<string, string>,
-  bearer_token_for_this_request?: string,
+  sdk_token_for_this_request?: Token,
 ): Promise<Record<string, unknown>> {
   const full_request_url = new URL(`${MAILPAL_REST_API_BASE_URL}${api_endpoint_path}`);
   if (url_query_parameters) {
@@ -167,19 +173,17 @@ async function send_authenticated_request_to_mailpal_rest_api(
     }
   }
 
-  const effective_bearer_token = bearer_token_for_this_request || MAILPAL_BEARER_AUTH_TOKEN;
+  const sdk_token = sdk_token_for_this_request ?? await oneid.get_token();
   const http_request_headers: Record<string, string> = {
     "Accept": "application/json",
-    "User-Agent": "mailpal-mcp-node/1.1.1",
+    "User-Agent": "mailpal-mcp-node/1.2.0",
   };
-  if (effective_bearer_token) {
-    http_request_headers["Authorization"] = `Bearer ${effective_bearer_token}`;
-  }
   if (json_request_body) {
     http_request_headers["Content-Type"] = "application/json";
   }
 
-  const http_response = await fetch(full_request_url.toString(), {
+  // sender-constrained: Authorization + an RFC 9421 signature by the enrolled key
+  const http_response = await fetch_with_airs_proof_of_possession(sdk_token, full_request_url.toString(), {
     method: http_method,
     headers: http_request_headers,
     body: json_request_body ? JSON.stringify(json_request_body) : undefined,
@@ -701,15 +705,14 @@ async function _start_background_sse_listener_for_inbox_event_notifications(): P
   }
   inbox_sse_abort_controller = new AbortController();
 
-  const effective_sse_token = bearer_token_for_active_sse_inbox_connection || MAILPAL_BEARER_AUTH_TOKEN;
-
   (async () => {
     let reconnect_delay_ms = 1000;
     while (!inbox_sse_abort_controller!.signal.aborted) {
       try {
-        const sse_response = await fetch(`${MAILPAL_REST_API_BASE_URL}/inbox/events`, {
+        // a fresh token + signature per (re)connection: signatures live 60 s
+        const sse_sdk_token = await oneid.get_token();
+        const sse_response = await fetch_with_airs_proof_of_possession(sse_sdk_token, `${MAILPAL_REST_API_BASE_URL}/inbox/events`, {
           headers: {
-            "Authorization": `Bearer ${effective_sse_token}`,
             "Accept": "text/event-stream",
             "Cache-Control": "no-cache",
           },
@@ -1151,7 +1154,7 @@ async function _handle_mailpal_search_emails_operation(params: Record<string, un
     "/jmap", "POST", {
       using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
       methodCalls: method_calls,
-    }, undefined, sdk_token.access_token,
+    }, undefined, sdk_token,
   );
   return JSON.stringify(api_response, null, 2);
 }
@@ -1178,7 +1181,7 @@ async function _handle_mailpal_delete_emails_operation(params: Record<string, un
         methodCalls: [
           ["Email/set", { accountId: _jmap_account_id, destroy: message_ids_to_process }, "delete"],
         ],
-      }, undefined, sdk_token.access_token,
+      }, undefined, sdk_token,
     );
     return JSON.stringify(api_response, null, 2);
   }
@@ -1194,7 +1197,7 @@ async function _handle_mailpal_delete_emails_operation(params: Record<string, un
           properties: ["id"],
         }, "get_trash"],
       ],
-    }, undefined, sdk_token.access_token,
+    }, undefined, sdk_token,
   );
 
   const trash_responses = (trash_lookup_response["methodResponses"] as unknown[][]) ?? [];
@@ -1221,7 +1224,7 @@ async function _handle_mailpal_delete_emails_operation(params: Record<string, un
       methodCalls: [
         ["Email/set", { accountId: _jmap_account_id, update: email_updates }, "trash_emails"],
       ],
-    }, undefined, sdk_token.access_token,
+    }, undefined, sdk_token,
   );
   return JSON.stringify(api_response, null, 2);
 }
@@ -1259,7 +1262,7 @@ async function _handle_mailpal_move_emails_operation(
       methodCalls: [
         ["Mailbox/get", { accountId: _jmap_account_id, properties: ["id", "name", "role"] }, "all_mailboxes"],
       ],
-    }, undefined, sdk_token.access_token,
+    }, undefined, sdk_token,
   );
 
   const mailbox_results = (all_mailboxes_response["methodResponses"] as unknown[][]) ?? [];
@@ -1300,7 +1303,7 @@ async function _handle_mailpal_move_emails_operation(
       methodCalls: [
         ["Email/set", { accountId: _jmap_account_id, update: email_updates }, "move_emails"],
       ],
-    }, undefined, sdk_token.access_token,
+    }, undefined, sdk_token,
   );
   return JSON.stringify(api_response, null, 2);
 }
@@ -1326,7 +1329,6 @@ async function _handle_mailpal_subscribe_to_inbox_operation(): Promise<string> {
   }
 
   subscribed_inbox_resource_uri = `mailpal://inbox/${agent_identifier_from_jwt_subject_claim}`;
-  bearer_token_for_active_sse_inbox_connection = effective_token;
 
   await _start_background_sse_listener_for_inbox_event_notifications();
 
@@ -1538,7 +1540,7 @@ mailpal_mcp_server_instance.tool(
         const sdk_token = await oneid.get_token();
         const api_response = await send_authenticated_request_to_mailpal_rest_api(
           `/inbox/${encodeURIComponent(message_id)}`,
-          "GET", undefined, undefined, sdk_token.access_token,
+          "GET", undefined, undefined, sdk_token,
         );
         return _format_as_mcp_json_content(api_response);
       }
@@ -1572,7 +1574,7 @@ mailpal_mcp_server_instance.tool(
           "/jmap", "POST", {
             using,
             methodCalls: effective_params["method_calls"],
-          }, undefined, sdk_token.access_token,
+          }, undefined, sdk_token,
         );
         return _format_as_mcp_json_content(api_response);
       }
@@ -1671,6 +1673,10 @@ mailpal_mcp_server_instance.tool(
           access_token: token.access_token,
           token_type: token.token_type,
           expires_at: String(token.expires_at),
+          sender_constrained: true,
+          note: "1ID tokens are bound to your enrolled key (cnf.jwk): services that verify them require an " +
+                "RFC 9421 signature by that key on every request, so this token alone is refused. Use the 1id " +
+                "SDK (fetch_with_airs_proof_of_possession signs for you).",
         });
       }
 

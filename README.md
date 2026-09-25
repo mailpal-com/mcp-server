@@ -48,7 +48,10 @@ and all Stalwart extensions. If a convenience tool doesn't exist for what you ne
 npx 1id enroll
 ```
 
-This creates a hardware-anchored identity and gives you a JWT token.
+This creates a hardware-anchored identity. The MCP server uses it directly:
+each MailPal request is signed with your enrolled key (TPM, YubiKey, Secure
+Enclave or software key), because 1ID tokens are sender-constrained -- a
+token on its own is refused. There is no token to copy into a config file.
 
 ### 2. Add to your MCP client
 
@@ -59,10 +62,7 @@ This creates a hardware-anchored identity and gives you a JWT token.
   "mcpServers": {
     "mailpal": {
       "command": "npx",
-      "args": ["-y", "mailpal-mcp-server"],
-      "env": {
-        "MAILPAL_TOKEN": "<your-1id-jwt>"
-      }
+      "args": ["-y", "mailpal-mcp-server"]
     }
   }
 }
@@ -75,10 +75,7 @@ This creates a hardware-anchored identity and gives you a JWT token.
   "mcpServers": {
     "mailpal": {
       "command": "npx",
-      "args": ["-y", "mailpal-mcp-server"],
-      "env": {
-        "MAILPAL_TOKEN": "<your-1id-jwt>"
-      }
+      "args": ["-y", "mailpal-mcp-server"]
     }
   }
 }
@@ -91,45 +88,21 @@ This creates a hardware-anchored identity and gives you a JWT token.
   "mcpServers": {
     "mailpal": {
       "command": "npx",
-      "args": ["-y", "mailpal-mcp-server"],
-      "env": {
-        "MAILPAL_TOKEN": "<your-1id-jwt>"
-      }
+      "args": ["-y", "mailpal-mcp-server"]
     }
   }
 }
 ```
-
-### 3. Or use the hosted endpoint (zero install)
-
-```json
-{
-  "mcpServers": {
-    "mailpal": {
-      "type": "streamable-http",
-      "url": "https://mailpal.com/mcp",
-      "headers": {
-        "Authorization": "Bearer <your-1id-jwt>"
-      }
-    }
-  }
-}
-```
-
-The hosted endpoint also supports real-time "You've Got Mail!" notifications
-via MCP resource subscriptions and SSE.
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `MAILPAL_TOKEN` | Yes | 1id.com JWT token for authentication |
 | `MAILPAL_API_URL` | No | Override API base URL (default: `https://mailpal.com/api/v1`) |
 
 ## Also Available As
 
 - **Python**: [`mailpal-mcp`](https://pypi.org/project/mailpal-mcp/) on PyPI -- `pip install mailpal-mcp`
-- **Hosted endpoint**: `https://mailpal.com/mcp` (Streamable HTTP, supports real-time notifications)
 - **REST API**: `https://mailpal.com/api/v1/` ([docs](https://mailpal.com/api/docs))
 - **Direct IMAP/SMTP**: `imap.mailpal.com:993` / `smtp.mailpal.com:587` (standard email clients)
 
